@@ -155,8 +155,8 @@ class SFE(object):
         tail_node_seqs = self.bfs_node_seqs(tail, nodes_intersect, max_depth)
 
         # get intermediate paths
-        head_inter_paths = sfe.get_edge_seqs(head_node_seqs)
-        tail_inter_paths = sfe.get_edge_seqs(tail_node_seqs)
+        head_inter_paths = self.get_edge_seqs(head_node_seqs)
+        tail_inter_paths = self.get_edge_seqs(tail_node_seqs)
 
         all_edge_seqs = []
         for inter_node in head_inter_paths:
