@@ -4,6 +4,13 @@ import pandas as pd
 import numpy as np
 import itertools
 
+## for debugging purposes
+def debug_print(list_of_els):
+    l = []
+    for n in list_of_els:
+        l.append(n.__str__())
+    print(l)
+
 class Edge(object):
     def __init__(self, start, end, label, direction):
         self.label = str(label)
@@ -72,8 +79,8 @@ class SFE(object):
         output = set([node])
         if max_depth > 1:
             for n in node.neighbors.difference(self.expanded_nodes): # loop through elements in neighbors that are not in expanded_nodes
-                output.union(self.get_subgraph_nodes(n, max_depth-1, init=False))
-            self.expanded_nodes.union(node.neighbors)
+                output = output.union(self.get_subgraph_nodes(n, max_depth-1, init=False))
+            self.expanded_nodes = self.expanded_nodes.union(node.neighbors)
         return output.union(node.neighbors)
 
     def bfs_node_seqs(self, start_node, goal_nodes, max_depth):
