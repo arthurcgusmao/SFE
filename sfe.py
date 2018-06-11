@@ -5,11 +5,11 @@ import numpy as np
 import itertools
 
 ## for debugging purposes
-def debug_print(list_of_els):
+def debug_print(list_of_els, something=''):
     l = []
     for n in list_of_els:
         l.append(n.__str__())
-    print(l)
+    print("{} --- {}".format(something, l))
 
 class Edge(object):
     def __init__(self, start, end, label, direction):
@@ -27,15 +27,19 @@ class Node(object):
         self.name = name
         self.neighbors = set()
         self.neighbor2edges = {} # a dict of the form {node: [edge1, edge2, ...]}
+        self.edge_fan_out = {} # store the fan out for each edge label, a dict of the form {edge_label: fan_out (int)}
 
     def __str__(self):
         return "Node({})".format(self.name)
 
     def add_edge(self, edge):
         self.neighbors.add(edge.end)
-        if not edge.end in self.neighbor2edges:
-            self.neighbor2edges[edge.end] = []
-        self.neighbor2edges[edge.end].append(edge)
+        # if not edge.end in self.neighbor2edges:
+        #     self.neighbor2edges[edge.end] = []
+        # self.neighbor2edges[edge.end].append(edge)
+        self.neighbor2edges[edge.end] = self.neighbor2edges.get(edge.end, []) + [edge]
+        self.edge_fan_out[edge.label] = self.edge_fan_out.get(edge.label, 0) + 1
+
 
 
 class Graph(object):
@@ -64,26 +68,7 @@ class SFE(object):
     def __init__(self, graph):
         self.graph = graph
 
-    def get_subgraph_nodes(self, node, max_depth, init=True):
-        """Returns all nodes present in a subgraph defined by walking at most `max_depth` edges
-        from an initial node.
-
-        Arguments:
-        - `node` (Node): the initial, central node for the subgraph
-        - `max_depth` (int): max-depth for the breadth-first search done to construct the subgraph
-        for each node (head and tail).
-        """
-        if init:
-            self.expanded_nodes = set() # save nodes that have been expanded
-        self.expanded_nodes.add(node)
-        output = set([node])
-        if max_depth > 1:
-            for n in node.neighbors.difference(self.expanded_nodes): # loop through elements in neighbors that are not in expanded_nodes
-                output = output.union(self.get_subgraph_nodes(n, max_depth-1, init=False))
-            self.expanded_nodes = self.expanded_nodes.union(node.neighbors)
-        return output.union(node.neighbors)
-
-    def bfs_node_seqs(self, start_node, goal_nodes, max_depth):
+    def bfs_node_seqs(self, start_node, max_depth):
         """Generates all possible sequences of nodes of max-depth `max_depth` one can walk
         to get to a set of goal nodes.
 
@@ -96,16 +81,16 @@ class SFE(object):
         Yields node sequences; each node sequence (list) is a nodes list that defines a set of possible
         edge sequences (paths).
         """
-        queue = [(start_node, [start_node])]
-        depth = 0
+        output = {} # indexed by end node; {end_node: [node sequence], ...}
+        queue = [(start_node, [start_node], 0)]
         while queue:
-            (vertex, path) = queue.pop(0)
+            (vertex, path, level) = queue.pop(0)
             for node in vertex.neighbors - set(path):
-                depth += 1
-                if node in goal_nodes:
-                    yield path + [node]
-                elif depth < max_depth:
-                    queue.append((node, path + [node]))
+                output[node] = output.get(node, []) + [path + [node]]
+                if level+1 < max_depth:
+                    queue.append((node, path + [node], level+1))
+        return output
+
 
     def get_edge_seqs(self, node_seqs, invert=False):
         """Returns all possible sequences of edges (paths) one can walk when following a set of node sequences.
@@ -115,19 +100,29 @@ class SFE(object):
 
         Returns a list of edge sequences; each edge sequence is a list of edges that defines a path.
         """
-        all_edges_seqs = {} # of the form: {end_node: [list of paths]}
+        edge_seqs = []
         for node_seq in node_seqs:
+            # for node in node_seq:
+            #     debug_print(node)
             possible_edges_seqs = []
             for i in range(1, len(node_seq)):
-                if invert:
-                    possible_edges_seqs.append(node_seq[i].neighbor2edges[node_seq[i-1]])
-                else:
-                    possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
-            end_node = node_seq[-1]
-            if not end_node in all_edges_seqs:
-                all_edges_seqs[end_node] = []
-            all_edges_seqs[end_node].extend(list(itertools.product(*possible_edges_seqs)))
-        return all_edges_seqs
+                possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
+            edge_seqs.extend(list(itertools.product(*possible_edges_seqs)))
+        return edge_seqs
+
+        # all_edges_seqs = {} # of the form: {end_node: [list of paths]}
+        # for node_seq in node_seqs:
+        #     possible_edges_seqs = []
+        #     for i in range(1, len(node_seq)):
+        #         if invert:
+        #             possible_edges_seqs.append(node_seq[i].neighbor2edges[node_seq[i-1]])
+        #         else:
+        #             possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
+        #     end_node = node_seq[-1]
+        #     if not end_node in all_edges_seqs:
+        #         all_edges_seqs[end_node] = []
+        #     all_edges_seqs[end_node].extend(list(itertools.product(*possible_edges_seqs)))
+        # return all_edges_seqs
 
     def get_features(self, paths, relation):
         """Returns a list of strings representing the feature names from a set of paths.
@@ -142,6 +137,18 @@ class SFE(object):
         if [str(relation)] in features: features.remove([str(relation)])
         return features
 
+    def merge_node_sequences(self, head, tail, head_node_seqs, tail_node_seqs):
+        node_seqs = set()
+        for end_node in head_node_seqs:
+            for head_node_seq in head_node_seqs.get(end_node, []):
+                if end_node == tail:
+                    node_seqs.add(tuple(head_node_seq))
+                else:
+                    for tail_node_seq in tail_node_seqs.get(end_node, []):
+                        if len(set(tail_node_seq).intersection(set(head_node_seq))) == 1: # check for acyclicity
+                            node_seqs.add(tuple(head_node_seq[:-1] + list(reversed(tail_node_seq))))
+        return node_seqs
+
     def search_paths(self, head_name, tail_name, max_depth):
         """Search paths between two nodes using the current graph.
 
@@ -154,33 +161,13 @@ class SFE(object):
         head = self.graph.get_node(head_name)
         tail = self.graph.get_node(tail_name)
 
-        nodes_subgraph_head = self.get_subgraph_nodes(head, max_depth)
-        nodes_subgraph_tail = self.get_subgraph_nodes(tail, max_depth)
+        head_node_seqs = self.bfs_node_seqs(head, max_depth) # indexed by end node
+        tail_node_seqs = self.bfs_node_seqs(tail, max_depth) # indexed by end node
 
-        nodes_intersect = nodes_subgraph_head.intersection(nodes_subgraph_tail)
+        node_seqs = self.merge_node_sequences(head, tail, head_node_seqs, tail_node_seqs)
+        edge_seqs = self.get_edge_seqs(node_seqs)
 
-        # now we know all nodes at the intersection of both subgraphs.
-        # we must now find paths between head and intersects and tail and intersects
-        head_node_seqs = self.bfs_node_seqs(head, nodes_intersect, max_depth)
-        tail_node_seqs = self.bfs_node_seqs(tail, nodes_intersect, max_depth)
-
-        # get intermediate paths
-        head_inter_paths = self.get_edge_seqs(head_node_seqs)
-        tail_inter_paths = self.get_edge_seqs(tail_node_seqs, invert=True)
-
-        all_edge_seqs = []
-        for inter_node in head_inter_paths:
-            head_edge_seqs = head_inter_paths[inter_node]
-            tail_edge_seqs = tail_inter_paths.get(inter_node, None) # tail may not have an inter_node because the end_node may be the tail itself.
-            if tail_edge_seqs == None:
-                edge_seqs = head_edge_seqs
-            else:
-                edge_seqs = []
-                for seq in itertools.product(head_edge_seqs, tail_edge_seqs):
-                    edge_seqs.append(seq[0] + seq[1])
-            all_edge_seqs.extend(edge_seqs)
-
-        return all_edge_seqs
+        return edge_seqs
 
     def generate_features(self, df, max_depth, batch_size=999999):
         """Run SFE for a set of triples.
