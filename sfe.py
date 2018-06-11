@@ -100,7 +100,7 @@ class SFE(object):
                 elif depth < max_depth:
                     queue.append((node, path + [node]))
 
-    def get_edge_seqs(self, node_seqs):
+    def get_edge_seqs(self, node_seqs, invert=False):
         """Returns all possible sequences of edges (paths) one can walk when following a set of node sequences.
 
         Arguments:
@@ -112,7 +112,10 @@ class SFE(object):
         for node_seq in node_seqs:
             possible_edges_seqs = []
             for i in range(1, len(node_seq)):
-                possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
+                if invert:
+                    possible_edges_seqs.append(node_seq[i].neighbor2edges[node_seq[i-1]])
+                else:
+                    possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
             end_node = node_seq[-1]
             if not end_node in all_edges_seqs:
                 all_edges_seqs[end_node] = []
@@ -133,7 +136,7 @@ class SFE(object):
         return features
 
     def search_paths(self, head_name, tail_name, max_depth):
-        """Extract features using the current graph for an entity (head, tail) pair.
+        """Search paths between two nodes using the current graph.
 
         Arguments:
         - `head_name` (string): head entity name.
@@ -156,7 +159,7 @@ class SFE(object):
 
         # get intermediate paths
         head_inter_paths = self.get_edge_seqs(head_node_seqs)
-        tail_inter_paths = self.get_edge_seqs(tail_node_seqs)
+        tail_inter_paths = self.get_edge_seqs(tail_node_seqs, invert=True)
 
         all_edge_seqs = []
         for inter_node in head_inter_paths:
