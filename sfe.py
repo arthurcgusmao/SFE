@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import pandas as pd
 import numpy as np
 import itertools
@@ -23,7 +24,8 @@ class Node(object):
         self.neighbors = set()
         self.neighbor2edges = {} # a dict of the form {node: [edge1, edge2, ...]}
         self.neighbor2edgesstr = {} # a dict of the form {node: [edge1.str, edge2.str, ...]}
-        self.edge_fan_out = {} # store the fan out for each edge label, a dict of the form {edge_label: fan_out (int)}
+        # self.edge_fan_out = {} # store the fan out for each edge label, a dict of the form {edge_label: fan_out (int)}
+        self.fan_out = 0
 
     def __str__(self):
         return "Node({})".format(self.name)
@@ -32,7 +34,8 @@ class Node(object):
         self.neighbors.add(edge.end)
         self.neighbor2edges[edge.end] = self.neighbor2edges.get(edge.end, []) + [edge]
         self.neighbor2edgesstr[edge.end] = self.neighbor2edgesstr.get(edge.end, []) + [edge.str]
-        self.edge_fan_out[edge.label] = self.edge_fan_out.get(edge.label, 0) + 1
+        # self.edge_fan_out[edge.label] = self.edge_fan_out.get(edge.label, 0) + 1
+        self.fan_out += 1
 
 
 class Graph(object):
@@ -58,18 +61,25 @@ class Graph(object):
 
 
 class SFE(object):
-    def __init__(self, graph):
-        self.graph = graph
+    def __init__(self, graph, max_depth=2, max_fan_out=None):
+        """Init method.
 
-    def bfs_node_seqs(self, start_node, max_depth):
+        Arguments:
+        - `max_depth` (int): max-depth for the breadth-first search done to construct the subgraph
+        for each node (head and tail).
+        """
+        self.graph = graph
+        self.max_depth = max_depth
+        self.max_fan_out = max_fan_out if max_fan_out != None else float('inf')
+
+    def bfs_node_seqs(self, start_node):
         """Generates all possible sequences of nodes of max-depth `max_depth` one can walk
         to get to a set of goal nodes.
+        Nodes whose fan-out exceeds max_fan_out are not expanded.
 
         Arguments:
         - `start_node` (Node): the initial node from where to walk from
         - `goal_nodes` (list of Nodes): a list of end nodes, every path has to end in one of these nodes
-        - `max_depth` (int): max-depth for the breadth-first search done to construct the subgraph
-        for each node (head and tail).
 
         Yields node sequences; each node sequence (list) is a nodes list that defines a set of possible
         edge sequences (paths).
@@ -78,10 +88,12 @@ class SFE(object):
         queue = [(start_node, [start_node], 0)]
         while queue:
             (vertex, path, level) = queue.pop(0)
-            for node in vertex.neighbors - set(path):
-                output[node] = output.get(node, []) + [path + [node]]
-                if level+1 < max_depth:
-                    queue.append((node, path + [node], level+1))
+            # only expand nodes whose fan_out does not exceed max
+            if vertex.fan_out <= self.max_fan_out:
+                for node in vertex.neighbors - set(path):
+                    output[node] = output.get(node, []) + [path + [node]]
+                    if level+1 < self.max_depth:
+                        queue.append((node, path + [node], level+1))
         return output
 
     def get_edge_seqs(self, node_seqs, invert=False):
@@ -109,7 +121,6 @@ class SFE(object):
             paths.update(itertools.product(*possible_paths))
         return paths
 
-
     def get_features(self, paths, relation):
         """Returns a list of strings representing the feature names from a set of paths.
         The feature that has the current relation as the only path is removed.
@@ -135,7 +146,7 @@ class SFE(object):
                             node_seqs.add(tuple(head_node_seq[:-1] + list(reversed(tail_node_seq))))
         return node_seqs
 
-    def search_paths(self, head_name, tail_name, max_depth):
+    def search_paths(self, head_name, tail_name):
         """Search paths between two nodes using the current graph.
 
         Arguments:
@@ -148,8 +159,8 @@ class SFE(object):
         head = self.graph.get_node(head_name)
         tail = self.graph.get_node(tail_name)
         print "time get nodes: {}".format(time.time() - last_time); last_time = time.time()
-        head_node_seqs = self.bfs_node_seqs(head, max_depth) # indexed by end node
-        tail_node_seqs = self.bfs_node_seqs(tail, max_depth) # indexed by end node
+        head_node_seqs = self.bfs_node_seqs(head) # indexed by end node
+        tail_node_seqs = self.bfs_node_seqs(tail) # indexed by end node
         print "time to find node sequences: {}".format(time.time() - last_time); last_time = time.time()
         node_seqs = self.merge_node_sequences(head, tail, head_node_seqs, tail_node_seqs)
         print "time to merge node sequences: {}".format(time.time() - last_time); last_time = time.time()
@@ -158,14 +169,14 @@ class SFE(object):
 
         return paths
 
-    def generate_features(self, df, max_depth, batch_size=999999):
+    def generate_features(self, df, batch_size=999999):
         """Run SFE for a set of triples.
 
         Arguments:
         - `df` (pandas.DataFrame): DataFrame with three columns: head, tail and relation.
         Each row represents a triple in a knowledge graph.
         """
-        # avoid unnecessary runs by running once for each node pair, indepedently of relation
+        # avoid unnecessary runs by running once for each node pair, independently of relation
         # run speed can be further improved by storing a bunch of BFS subgraphs and processing
         # close together.
         df = df.sort_values(by=['head', 'tail'])
@@ -175,7 +186,7 @@ class SFE(object):
             if last['head'] == row['head'] and last['tail'] == row['tail']:
                 pass
             else:
-                paths = self.search_paths(row['head'], row['tail'], max_depth)
+                paths = self.search_paths(row['head'], row['tail'])
             features.append((idx, paths - {(row['relation'],)}))
             if len(features) == batch_size:
                 yield features
