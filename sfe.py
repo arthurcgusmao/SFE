@@ -22,9 +22,9 @@ class Node(object):
     def __init__(self, name):
         self.name = name
         self.neighbors = set()
-        self.neighbor2edges = {} # a dict of the form {node: [edge1, edge2, ...]}
+        # self.neighbor2edges = {} # a dict of the form {node: [edge1, edge2, ...]}
         self.neighbor2edgesstr = {} # a dict of the form {node: [edge1.str, edge2.str, ...]}
-        # self.edge_fan_out = {} # store the fan out for each edge label, a dict of the form {edge_label: fan_out (int)}
+        # self.edgestr2neighbors = {} # a dict of the form {edge1.str: [node1, node2, ...]}
         self.fan_out = 0
 
     def __str__(self):
@@ -32,10 +32,25 @@ class Node(object):
 
     def add_edge(self, edge):
         self.neighbors.add(edge.end)
-        self.neighbor2edges[edge.end] = self.neighbor2edges.get(edge.end, []) + [edge]
+        # self.neighbor2edges[edge.end] = self.neighbor2edges.get(edge.end, []) + [edge]
         self.neighbor2edgesstr[edge.end] = self.neighbor2edgesstr.get(edge.end, []) + [edge.str]
-        # self.edge_fan_out[edge.label] = self.edge_fan_out.get(edge.label, 0) + 1
+        # self.edgestr2neighbors[edge.str] = self.edgestr2neighbors.get(edge.str, []) + [edge.end]
         self.fan_out += 1
+
+    def get_edgestr2neighbors(self, edgestr):
+        """This method works like a dict, mapping edge labels to nodes that are related to this
+        node through that edge. Notice that reversed edges are considered different than their
+        regular version, since we are dealing with its final string.
+
+        The goal of creating a method for this is to save space. Thus, the actual dict is only
+        created when necessary.
+        """
+        if not hasattr(self, 'edgestr2neighbors'):
+            self.edgestr2neighbors = {} # a dict of the form {edge1.str: [node1, node2, ...]}
+            for neighbor,edgesstrs in self.neighbor2edgesstr.iteritems():
+                for edgestr in edgesstrs:
+                    self.edgestr2neighbors[edgestr] = self.edgestr2neighbors.get(edgestr, []) + [neighbor]
+        return self.edgestr2neighbors.get(edgestr, [])
 
 
 class Graph(object):
@@ -74,7 +89,7 @@ class SFE(object):
 
     def bfs_node_seqs(self, start_node):
         """Generates all possible sequences of nodes of max-depth `max_depth` one can walk
-        to get to a set of goal nodes.
+        from a start node.
         Nodes whose fan-out exceeds max_fan_out are not expanded.
 
         Arguments:
@@ -96,23 +111,29 @@ class SFE(object):
                         queue.append((node, path + [node], level+1))
         return output
 
-    def get_edge_seqs(self, node_seqs, invert=False):
-        """Returns all possible sequences of edges (paths) one can walk when following a set of node sequences.
+    # def get_edge_seqs(self, node_seqs, invert=False):
+    #     """Returns all possible sequences of edges (paths) one can walk when following a set of node sequences.
+    #
+    #     Arguments:
+    #     - `node_seqs` (iterable): an iterable where each element should be a list of Nodes.
+    #
+    #     Returns a list of edge sequences; each edge sequence is a list of edges that defines a path.
+    #     """
+    #     edge_seqs = set()
+    #     for node_seq in node_seqs:
+    #         possible_edges_seqs = []
+    #         for i in range(1, len(node_seq)):
+    #             possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
+    #         edge_seqs.update(itertools.product(*possible_edges_seqs))
+    #     return edge_seqs
+
+    def get_paths(self, node_seqs):
+        """Outputs all possible sequences of edges (paths) one can walk when following a set of node sequences.
+        Returns a list of edge sequences; each edge sequence is a list of edge strings that defines a path.
 
         Arguments:
         - `node_seqs` (iterable): an iterable where each element should be a list of Nodes.
-
-        Returns a list of edge sequences; each edge sequence is a list of edges that defines a path.
         """
-        edge_seqs = set()
-        for node_seq in node_seqs:
-            possible_edges_seqs = []
-            for i in range(1, len(node_seq)):
-                possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
-            edge_seqs.update(itertools.product(*possible_edges_seqs))
-        return edge_seqs
-
-    def get_paths(self, node_seqs):
         paths = set()
         for node_seq in node_seqs:
             possible_paths = []
