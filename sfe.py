@@ -6,51 +6,38 @@ import numpy as np
 import itertools
 
 
+def debug_get_name_of_els_in_list(list_of_els):
+    """Prints a list of elements using their string method."""
+    l = []
+    for n in list_of_els:
+        l.append(n.__str__())
+    return l
+
+
 class Edge(object):
-    def __init__(self, start, end, label, direction):
-        self.label = str(label)
+    def __init__(self, start, end, type):
+        self.type = str(type)
         self.start = start
         self.end = end
-        self.direction = direction
-        self.str = self.__str__()
-
-    def __str__(self):
-        return self.label if self.direction == 1 else '_' + self.label
-
 
 class Node(object):
     def __init__(self, name):
         self.name = name
-        self.neighbors = set()
-        # self.neighbor2edges = {} # a dict of the form {node: [edge1, edge2, ...]}
-        self.neighbor2edgesstr = {} # a dict of the form {node: [edge1.str, edge2.str, ...]}
-        # self.edgestr2neighbors = {} # a dict of the form {edge1.str: [node1, node2, ...]}
         self.fan_out = 0
+        self.edge_fan_out = {} # indexed by edge_type; {edge_type: [fan out count]}
+        self.in_edge2neighbors = {} # indexed by edge_type; {edge_type: [list of neighbors]}
+        self.out_edge2neighbors = {} # indexed by edge_type; {edge_type: [list of neighbors]}
 
     def __str__(self):
         return "Node({})".format(self.name)
 
-    def add_edge(self, edge):
-        self.neighbors.add(edge.end)
-        # self.neighbor2edges[edge.end] = self.neighbor2edges.get(edge.end, []) + [edge]
-        self.neighbor2edgesstr[edge.end] = self.neighbor2edgesstr.get(edge.end, []) + [edge.str]
-        # self.edgestr2neighbors[edge.str] = self.edgestr2neighbors.get(edge.str, []) + [edge.end]
+    def add_edge(self, edge, direction):
+        if direction == 'in':
+            self.in_edge2neighbors[edge.type] = self.in_edge2neighbors.get(edge.type, set()).union([edge.start])
+        else:
+            self.out_edge2neighbors[edge.type] = self.out_edge2neighbors.get(edge.type, set()).union([edge.end])
         self.fan_out += 1
-
-    def get_edgestr2neighbors(self, edgestr):
-        """This method works like a dict, mapping edge labels to nodes that are related to this
-        node through that edge. Notice that reversed edges are considered different than their
-        regular version, since we are dealing with its final string.
-
-        The goal of creating a method for this is to save space. Thus, the actual dict is only
-        created when necessary.
-        """
-        if not hasattr(self, 'edgestr2neighbors'):
-            self.edgestr2neighbors = {} # a dict of the form {edge1.str: [node1, node2, ...]}
-            for neighbor,edgesstrs in self.neighbor2edgesstr.iteritems():
-                for edgestr in edgesstrs:
-                    self.edgestr2neighbors[edgestr] = self.edgestr2neighbors.get(edgestr, []) + [neighbor]
-        return self.edgestr2neighbors.get(edgestr, [])
+        self.edge_fan_out[edge.type] = self.edge_fan_out.get(edge.type, 0) + 1 # we count the fan out per edge type, regardless whether it's an incoming or outgoing edge
 
 
 class Graph(object):
@@ -71,12 +58,13 @@ class Graph(object):
             head = self.get_node(row['head'], create=True)
             tail = self.get_node(row['tail'], create=True)
             relation = row['relation']
-            head.add_edge(Edge(head, tail, relation, +1))
-            tail.add_edge(Edge(tail, head, relation, -1))
+            edge = Edge(head, tail, relation)
+            head.add_edge(edge, 'out')
+            tail.add_edge(edge, 'in')
 
 
 class SFE(object):
-    def __init__(self, graph, max_depth=2, max_fan_out=None):
+    def __init__(self, graph, max_depth=2, max_fan_out=100):
         """Init method.
 
         Arguments:
@@ -87,85 +75,66 @@ class SFE(object):
         self.max_depth = max_depth
         self.max_fan_out = max_fan_out if max_fan_out != None else float('inf')
 
-    def bfs_node_seqs(self, start_node):
-        """Generates all possible sequences of nodes of max-depth `max_depth` one can walk
+    def bfs_edge_seqs(self, start_node, is_tail=False):
+        """Generates all possible sequence of edges of max-depth `max_depth` one can walk
         from a start node.
-        Nodes whose fan-out exceeds max_fan_out are not expanded.
+        Edges whose fan-out exceeds max_fan_out are not expanded.
 
         Arguments:
         - `start_node` (Node): the initial node from where to walk from
-        - `goal_nodes` (list of Nodes): a list of end nodes, every path has to end in one of these nodes
-
-        Yields node sequences; each node sequence (list) is a nodes list that defines a set of possible
-        edge sequences (paths).
+        - `is_tail` (Bool): indicates how the relation strings should be directed
         """
-        output = {} # indexed by end node; {end_node: [node sequence], ...}
-        queue = [(start_node, [start_node], 0)]
+        output = {} # indexed by end node; {end_node: {(node sequence): [(edge sequence 1), ...]}}
+        queue = [(start_node, (start_node,), (), 0)]
         while queue:
-            (vertex, path, level) = queue.pop(0)
-            # only expand nodes whose fan_out does not exceed max
-            if vertex.fan_out <= self.max_fan_out:
-                for node in vertex.neighbors - set(path):
-                    output[node] = output.get(node, []) + [path + [node]]
-                    if level+1 < self.max_depth:
-                        queue.append((node, path + [node], level+1))
+            (vertex, node_seq, edge_seq, level) = queue.pop(0)
+            for edge_type in vertex.edge_fan_out:
+                if vertex.edge_fan_out[edge_type] <= self.max_fan_out: # only expand nodes whose fan_out does not exceed max
+                    # loop for outgoing edges
+                    for node in vertex.out_edge2neighbors.get(edge_type, set()) - set(node_seq):
+                        new_node_seq = node_seq + (node,)
+                        new_edge_seq = edge_seq + (edge_type,) if not is_tail else edge_seq + ('_' + edge_type,) # edges preceded by '_' are incoming edges
+                        node_seq2edge_seqs = output.get(node, {})
+                        node_seq2edge_seqs[new_node_seq] = node_seq2edge_seqs.get(new_node_seq, set()).union([new_edge_seq])
+                        output[node] = node_seq2edge_seqs
+                        if level+1 < self.max_depth:
+                            queue.append((node, new_node_seq, new_edge_seq, level+1))
+                    # loop for incoming edges
+                    for node in vertex.in_edge2neighbors.get(edge_type, set()) - set(node_seq):
+                        new_node_seq = node_seq + (node,)
+                        new_edge_seq = edge_seq + ('_' + edge_type,) if not is_tail else edge_seq + (edge_type,) # edges preceded by '_' are incoming edges
+                        node_seq2edge_seqs = output.get(node, {})
+                        node_seq2edge_seqs[new_node_seq] = node_seq2edge_seqs.get(new_node_seq, set()).union([new_edge_seq])
+                        output[node] = node_seq2edge_seqs
+                        if level+1 < self.max_depth:
+                            queue.append((node, new_node_seq, new_edge_seq, level+1))
         return output
 
-    # def get_edge_seqs(self, node_seqs, invert=False):
-    #     """Returns all possible sequences of edges (paths) one can walk when following a set of node sequences.
-    #
-    #     Arguments:
-    #     - `node_seqs` (iterable): an iterable where each element should be a list of Nodes.
-    #
-    #     Returns a list of edge sequences; each edge sequence is a list of edges that defines a path.
-    #     """
-    #     edge_seqs = set()
-    #     for node_seq in node_seqs:
-    #         possible_edges_seqs = []
-    #         for i in range(1, len(node_seq)):
-    #             possible_edges_seqs.append(node_seq[i-1].neighbor2edges[node_seq[i]])
-    #         edge_seqs.update(itertools.product(*possible_edges_seqs))
-    #     return edge_seqs
-
-    def get_paths(self, node_seqs):
-        """Outputs all possible sequences of edges (paths) one can walk when following a set of node sequences.
-        Returns a list of edge sequences; each edge sequence is a list of edge strings that defines a path.
-
-        Arguments:
-        - `node_seqs` (iterable): an iterable where each element should be a list of Nodes.
-        """
-        paths = set()
-        for node_seq in node_seqs:
-            possible_paths = []
-            for i in range(1, len(node_seq)):
-                possible_paths.append(node_seq[i-1].neighbor2edgesstr[node_seq[i]])
-            paths.update(itertools.product(*possible_paths))
-        return paths
-
-    def get_features(self, paths, relation):
-        """Returns a list of strings representing the feature names from a set of paths.
-        The feature that has the current relation as the only path is removed.
-        """
-        features = []
-        for path in paths:
-            edges = []
-            for edge in path:
-                edges.append(edge.__str__())
-            features.append(edges)
-        if [str(relation)] in features: features.remove([str(relation)])
-        return features
-
-    def merge_node_sequences(self, head, tail, head_node_seqs, tail_node_seqs):
-        node_seqs = set()
-        for end_node in head_node_seqs:
-            for head_node_seq in head_node_seqs.get(end_node, []):
-                if end_node == tail:
-                    node_seqs.add(tuple(head_node_seq))
-                else:
-                    for tail_node_seq in tail_node_seqs.get(end_node, []):
+    def merge_edge_sequences(self, head, tail, head_bfs_res, tail_bfs_res):
+        output = set() # set of edge sequences between the two nodes
+        for end_node in head_bfs_res:
+            # print '\n----- for end node = {} -----'.format(end_node)
+            head__node_seq2edge_seqs = head_bfs_res.get(end_node, {})
+            if end_node == tail:
+                for edge_seq in head__node_seq2edge_seqs.values():
+                    # print 'end_node = tail; edge_seq = ', edge_seq
+                    output = output.union(edge_seq)
+            else:
+                tail__node_seq2edge_seqs = tail_bfs_res.get(end_node, {})
+                # print("!!!### {} ||| {} ###!!!".format(head__node_seq2edge_seqs, type(head__node_seq2edge_seqs)))
+                for head_node_seq in head__node_seq2edge_seqs:
+                    for tail_node_seq in tail__node_seq2edge_seqs:
+                        # print '`head_node_seq`:', head_node_seq, type(head_node_seq)
+                        # print '`tail_node_seq`:', tail_node_seq, type(tail_node_seq)
                         if len(set(tail_node_seq).intersection(set(head_node_seq))) == 1: # check for acyclicity
-                            node_seqs.add(tuple(head_node_seq[:-1] + list(reversed(tail_node_seq))))
-        return node_seqs
+                            # print '`head_node_seq`:', head_node_seq, type(head_node_seq)
+                            # print '`tail_node_seq`:', tail_node_seq, type(tail_node_seq)
+                            for head_edge_seq in head__node_seq2edge_seqs[head_node_seq]:
+                                for tail_edge_seq in tail__node_seq2edge_seqs[tail_node_seq]:
+                                    # print '`head_node_seq`: {} \t `head_edge_seq`: {}'.format(debug_get_name_of_els_in_list(head_node_seq), head_edge_seq)
+                                    # print '`tail_node_seq`: {} \t `tail_edge_seq`: {}'.format(debug_get_name_of_els_in_list(tail_node_seq), tail_edge_seq)
+                                    output.add(head_edge_seq + tuple(reversed(tail_edge_seq)))
+        return output
 
     def search_paths(self, head_name, tail_name):
         """Search paths between two nodes using the current graph.
@@ -179,18 +148,15 @@ class SFE(object):
         last_time = time.time()
         head = self.graph.get_node(head_name)
         tail = self.graph.get_node(tail_name)
-        print "time get nodes: {}".format(time.time() - last_time); last_time = time.time()
-        head_node_seqs = self.bfs_node_seqs(head) # indexed by end node
-        tail_node_seqs = self.bfs_node_seqs(tail) # indexed by end node
-        print "time to find node sequences: {}".format(time.time() - last_time); last_time = time.time()
-        node_seqs = self.merge_node_sequences(head, tail, head_node_seqs, tail_node_seqs)
-        print "time to merge node sequences: {}".format(time.time() - last_time); last_time = time.time()
-        paths = self.get_paths(node_seqs)
-        print "time to get paths: {}".format(time.time() - last_time); last_time = time.time()
+        # print "time get nodes: {}".format(time.time() - last_time); last_time = time.time()
+        head_bfs_res = self.bfs_edge_seqs(head) # indexed by end node
+        tail_bfs_res = self.bfs_edge_seqs(tail, is_tail=True) # indexed by end node
+        # print "time to perform BFS on both nodes: {}".format(time.time() - last_time); last_time = time.time()
+        edge_seqs = self.merge_edge_sequences(head, tail, head_bfs_res, tail_bfs_res)
+        # print "time to merge edge sequences: {}".format(time.time() - last_time); last_time = time.time()
+        return edge_seqs
 
-        return paths
-
-    def generate_features(self, df, batch_size=999999):
+    def extract_features(self, df, batch_size=999999):
         """Run SFE for a set of triples.
 
         Arguments:
