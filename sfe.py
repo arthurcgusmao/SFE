@@ -1,10 +1,9 @@
-import os
 import time
-import math
 import pandas as pd
 import numpy as np
-import itertools
-
+from multiprocessing import Queue, Process
+from multiprocessing import cpu_count
+import threading
 
 def debug_get_name_of_els_in_list(list_of_els):
     """Prints a list of elements using their string method."""
@@ -62,9 +61,49 @@ class Graph(object):
             head.add_edge(edge, 'out')
             tail.add_edge(edge, 'in')
 
+    # def partial_build_from_graph(self, g):
+    #     self.nodes.update(g.nodes)
+
+    # def partial_build_from_df_threading(self, df, n_jobs=cpu_count()):
+    #     batch_size = (len(df) + n_jobs - 1) / n_jobs
+    #     threads = {}
+    #     for j in range(n_jobs):
+    #         threads[j] = threading.Thread(target=self.partial_build_from_df, args=(df[j*batch_size:(j+1)*batch_size],))
+    #     for j in range(n_jobs):
+    #         threads[j].start()
+    #     for j in range(n_jobs):
+    #         threads[j].join()
+    #
+    # def partial_build_from_df_multiprocessing(self, df, n_jobs=cpu_count()):
+    #     batch_size = (len(df) + n_jobs - 1) / n_jobs
+    #     ps = {} # dict of Processes
+    #     for j in range(n_jobs):
+    #         ps[j] = Process(target=self.partial_build_from_df, args=(df[j*batch_size:(j+1)*batch_size],))
+    #     for j in range(n_jobs):
+    #         ps[j].start()
+    #     for j in range(n_jobs):
+    #         ps[j].join()
+
+    # def partial_build_from_df_multiprocessing(self, df, n_jobs=cpu_count()):
+    #     batch_size = (len(df) + n_jobs - 1) / n_jobs
+    #     gs = {} # dict of Graphs
+    #     qs = {} # dict of Queues
+    #     ps = {} # dict of Processes
+    #     for j in range(n_jobs):
+    #         gs[j] = Graph()
+    #         qs[j] = Queue()
+    #         ps[j] = Process(target=gs[j].partial_build_from_df, args=(df[j*batch_size:(j+1)*batch_size],))
+    #     for j in range(n_jobs):
+    #         ps[j].start()
+    #     for j in range(n_jobs):
+    #         self.partial_build_from_graph(qs[j].get())
+    #     for j in range(n_jobs):
+    #         ps[j].join()
+    #         del gs[j]
+
 
 class SFE(object):
-    def __init__(self, graph, max_depth=2, max_fan_out=100):
+    def __init__(self, graph, max_depth=2, max_fan_out=100, bfs_memory_size=50):
         """Init method.
 
         Arguments:
@@ -75,6 +114,33 @@ class SFE(object):
         self.max_depth = max_depth
         self.max_fan_out = max_fan_out if max_fan_out != None else float('inf')
 
+        self.last_head = None
+        self.last_tail = None
+
+        self.bfs_memory = {}
+        self.bfs_memory_size = bfs_memory_size
+        self.bfs_memory_stack = []
+
+    def add_to_bfs_memory(self, node, bfs_result):
+        """Adds the current node's BFS result to memory.
+
+        WARNING: This method should only be called when node IS NOT in memory.
+        """
+        if len(self.bfs_memory) >= self.bfs_memory_size:
+            oldest_node = self.bfs_memory_stack.pop(0)
+            del self.bfs_memory[oldest_node] # remove oldest result from memory
+        self.bfs_memory[node] = bfs_result # store current node's result in memory
+        self.bfs_memory_stack.append(node) # place current node as more recent in stack
+
+    def retrieve_from_bfs_memory(self, node):
+        """Returns BFS result of node stored in memory.
+
+        WARNING: This method should only be called when node IS in memory.
+        """
+        self.bfs_memory_stack.remove(node) # remove current node from stack
+        self.bfs_memory_stack.append(node) # and replace it in the more recent position in stack
+        return self.bfs_memory[node]
+
     def bfs_edge_seqs(self, start_node, is_tail=False):
         """Generates all possible sequence of edges of max-depth `max_depth` one can walk
         from a start node.
@@ -84,6 +150,10 @@ class SFE(object):
         - `start_node` (Node): the initial node from where to walk from
         - `is_tail` (Bool): indicates how the relation strings should be directed
         """
+        # check if result already in memory
+        if start_node in self.bfs_memory:
+            return self.retrieve_from_bfs_memory(start_node)
+        # run bfs otherwise
         output = {} # indexed by end node; {end_node: {(node sequence): [(edge sequence 1), ...]}}
         queue = [(start_node, (start_node,), (), 0)]
         while queue:
@@ -108,6 +178,7 @@ class SFE(object):
                         output[node] = node_seq2edge_seqs
                         if level+1 < self.max_depth:
                             queue.append((node, new_node_seq, new_edge_seq, level+1))
+        self.add_to_bfs_memory(start_node, output)
         return output
 
     def merge_edge_sequences(self, head, tail, head_bfs_res, tail_bfs_res):
@@ -154,6 +225,8 @@ class SFE(object):
         # print "time to perform BFS on both nodes: {}".format(time.time() - last_time); last_time = time.time()
         edge_seqs = self.merge_edge_sequences(head, tail, head_bfs_res, tail_bfs_res)
         # print "time to merge edge sequences: {}".format(time.time() - last_time); last_time = time.time()
+        self.last_head = head
+        self.last_tail = tail
         return edge_seqs
 
     def extract_features(self, df, batch_size=999999):
@@ -167,15 +240,42 @@ class SFE(object):
         # run speed can be further improved by storing a bunch of BFS subgraphs and processing
         # close together.
         df = df.sort_values(by=['head', 'tail'])
-        last = {'head': None, 'tail': None}; paths = None
-        features = []
+        paths = None
+        count = 0 # count number of examples processed
+        output = {} # dict; keys are edge_types and values are dicts of the form {entity_pair: (head,tail), label: {1,-1}, features: set()}
+        for rel in df['relation'].unique():
+            output[rel] = []
+
         for idx,row in df.iterrows():
-            if last['head'] == row['head'] and last['tail'] == row['tail']:
-                pass
-            else:
-                paths = self.search_paths(row['head'], row['tail'])
-            features.append((idx, paths - {(row['relation'],)}))
-            if len(features) == batch_size:
-                yield features
-                features = []
-        yield features
+            head = row['head']
+            tail = row['tail']
+            rel = row['relation']
+            label = row.get('label', None)
+
+            paths = self.search_paths(head, tail)
+            output[rel].append({
+                'entity_pair': (head, tail),
+                'label': label,
+                'features': paths - {(rel,)} # remove path composed only of the relation in question
+            })
+
+            count += 1
+            if count == batch_size:
+                yield output
+                for rel in df['relation'].unique():
+                    output[rel] = [] # clear output
+                count = 0
+        yield output
+
+    # def save_features_to_disk(self, df, features):
+    #
+    #
+    # def extract_features_to_disk(self, df, n_jobs=cpu_count()):
+    #     batch_size = (len(df) + n_jobs - 1) / n_jobs
+    #     ps = {} # dict of Processes
+    #     for j in range(n_jobs):
+    #         ps[j] = Process(target=self.extract_features, args=(df[j*batch_size:(j+1)*batch_size],))
+    #     for j in range(n_jobs):
+    #         ps[j].start()
+    #     for j in range(n_jobs):
+    #         ps[j].join()
