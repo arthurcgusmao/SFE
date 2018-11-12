@@ -1,9 +1,11 @@
+import os
 import time
 import pandas as pd
 import numpy as np
 from multiprocessing import Queue, Process
 from multiprocessing import cpu_count
 import threading
+# from helpers import save_features_to_disk
 
 def debug_get_name_of_els_in_list(list_of_els):
     """Prints a list of elements using their string method."""
@@ -229,7 +231,7 @@ class SFE(object):
         self.last_tail = tail
         return edge_seqs
 
-    def extract_features(self, df, batch_size=999999):
+    def extract_features(self, df, batch_size=10000):
         """Run SFE for a set of triples.
 
         Arguments:
@@ -267,9 +269,18 @@ class SFE(object):
                 count = 0
         yield output
 
-    # def save_features_to_disk(self, df, features):
+
+    # def save_all_features_to_disk(self, df, n_jobs=cpu_count(), batch_size=5000):
+    #     b = (len(df) + n_jobs - 1) / n_jobs
+    #     ps = {} # dict of Processes
+    #     for j in range(n_jobs):
+    #         ps[j] = Process(target=self.extract_features, args=(df[j*b:(j+1)*b],))
+    #     for j in range(n_jobs):
+    #         ps[j].start()
+    #     for j in range(n_jobs):
+    #         ps[j].join()
     #
-    #
+
     # def extract_features_to_disk(self, df, n_jobs=cpu_count()):
     #     batch_size = (len(df) + n_jobs - 1) / n_jobs
     #     ps = {} # dict of Processes
@@ -279,3 +290,8 @@ class SFE(object):
     #         ps[j].start()
     #     for j in range(n_jobs):
     #         ps[j].join()
+
+# if not os.path.isfile(output_file_name):
+#     df.to_csv(output_file_name, header=False, cols=['entity_pair', 'label', 'features'])
+# else:
+#     df.to_csv(output_file_name, mode='a', header=False, cols=['entity_pair', 'label', 'features'])
