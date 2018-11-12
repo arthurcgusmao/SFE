@@ -1,4 +1,5 @@
 import os
+import numpy as np
 
 def dfs_node_sequence_from_path(start, goal, edges_path, nodes_path=None):
     """Performs a DFS following a restricted edges path. One may want to use this function
@@ -31,7 +32,7 @@ def dfs_node_sequence_from_path(start, goal, edges_path, nodes_path=None):
 
 ####################################################################
 ##
-## FEATURE SAVING FUNCTIONS
+## FEATURE SAVING/READING FUNCTIONS
 ##
 def stringify_res(res):
     """This method will transform the results (`res`) of the `extract_features()` function to
@@ -69,6 +70,30 @@ def save_features_to_disk(res, output_dir, output_file_name):
         with open(rel_output_file_path, 'a') as f:
             f.write(res[rel])
 
+def parse_feature_matrix(filepath):
+    """Returns four objects: three lists (of heads, tails and labels) and a sparse matrix (of
+    features) for the input (a path to a feature matrix file).
+    """
+    heads = []
+    tails = []
+    labels = []
+    feat_dicts = []
+    with open(filepath, 'r') as f:
+        for line in f:
+            ent_pair, label, features = line.replace('\n', '').split('\t')
+            head, tail = ent_pair.split(',')
+            d = {}
+            if features:
+                for feat in features.split(' -#- '):
+                    feat_name, value = feat.split(',')
+                    d[feat_name] = float(value)
+
+            heads.append(head)
+            tails.append(tail)
+            labels.append(int(label))
+            feat_dicts.append(d)
+
+    return np.array(heads), np.array(tails), np.array(labels), feat_dicts
 
 
 ##################################################################
@@ -92,3 +117,37 @@ def build_graph_input_from_benchmark(benchmark_path):
     valid_pos = valid.loc[valid['label'] == 1]
 
     # @TODO: the dataframes to save are `valid_pos` and `train`. They must be saved into a folder called `pra_graph_input`, e.g., XKE/benchmarks/NELL186/pra_graph_input/train.tsv and valid.tsv
+
+
+##################################################################
+##
+## COMPARE TWO EXTRACTED FEATURES MATRICES
+##
+def compare_feature_matrices(filepath1, filepath2):
+    heads, tails, labels, feat_dicts = parse_feature_matrix(filepath1)
+    zipped1 = zip(list(heads),list(tails),list(labels),feat_dicts)
+    heads, tails, labels, feat_dicts = parse_feature_matrix(filepath2)
+    zipped2 = zip(list(heads),list(tails),list(labels),feat_dicts)
+
+    zipped1.sort()
+    zipped2.sort()
+
+    if zipped1 == zipped2:
+        print "Feature matrices are equivalent."
+        return
+
+    # else, return rows that are different
+    z1_diff_z2 = []
+    for inst in zipped1:
+        if not inst in zipped2:
+            z1_diff_z2.append(inst)
+    z2_diff_z1 = []
+    for inst in zipped2:
+        if not inst in zipped1:
+            z2_diff_z1.append(inst)
+
+    z1_diff_z2.sort()
+    z2_diff_z1.sort()
+
+    print "Entity pairs that are different will be returned by this function."
+    return z1_diff_z2, z2_diff_z1
