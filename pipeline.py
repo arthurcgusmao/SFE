@@ -11,6 +11,7 @@ def pipeline(
     pra_graph_input_path, # list containing the path to where the tsv files containing set of triples to be used to build the graph are, e.g., `XKE/benchmarks/FB13/pra_graph_input/`. There should be `train.tsv` and `valid.tsv` files. Each line should contain the head, relation and tail of an existing triple, in the mentioned order.
     datasets_paths, # list containing the path for each dataset for which features will be extracted. The dataset file should be a TSV file containing the columns (in the order): head, relation, tail, label
     output_dir, # path for the output dir, the directory where results will be saved
+    # @TODO: add timestamp to output_dir (and also save a text file in it containing the parameters (SFE options) used in the extraction)
 
     # SFE options
     max_depth=2,
