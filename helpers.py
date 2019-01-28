@@ -116,7 +116,10 @@ def build_graph_input_from_benchmark(benchmark_path):
 
     valid_pos = valid.loc[valid['label'] == 1]
 
-    # @TODO: the dataframes to save are `valid_pos` and `train`. They must be saved into a folder called `pra_graph_input`, e.g., XKE/benchmarks/NELL186/pra_graph_input/train.tsv and valid.tsv
+    graph_input_path = os.path.join(benchmark_path, 'pra_graph_input')
+    os.mkdir(graph_input_path)
+    train.to_csv(os.path.join(graph_input_path, 'train.tsv'))
+    valid_pos.to_csv(os.path.join(graph_input_path, 'valid.tsv'))
 
 
 ##################################################################
