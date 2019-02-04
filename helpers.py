@@ -122,8 +122,8 @@ def build_graph_input_from_benchmark(benchmark_path):
     valid_pos = valid.loc[valid['label'] == 1]
 
     os.mkdir(graph_input_path)
-    train.to_csv(os.path.join(graph_input_path, 'train.tsv'))
-    valid_pos.to_csv(os.path.join(graph_input_path, 'valid.tsv'))
+    train.to_csv(os.path.join(graph_input_path, 'train.tsv'), index=False, header=False, sep='\t', columns=['head', 'relation', 'tail'])
+    valid_pos.to_csv(os.path.join(graph_input_path, 'valid.tsv'), index=False, header=False, sep='\t', columns=['head', 'relation', 'tail'])
 
 
 ##################################################################

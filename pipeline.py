@@ -22,7 +22,7 @@ def pipeline(
 
     # SAVE HYPERPARAMS TO DISK
     if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+        os.makedirs(output_dir)
     params_str = json.dumps(locals())
     with open(os.path.join(output_dir, 'hyperparameters.json'), 'w') as f:
         f.write(params_str)
