@@ -1,18 +1,28 @@
 import os
 import numpy as np
 
-def dfs_node_sequence_from_path(start, goal, edges_path, nodes_path=None):
+def debug_get_name_of_els_in_list(list_of_els):
+    """Prints a list of elements using their string method."""
+    l = []
+    for n in list_of_els:
+        l.append(n.__str__())
+    return l
+
+def dfs_node_sequence_from_path(start, goal, edges_path, nodes_path=None, allow_cycles=False):
     """Performs a DFS following a restricted edges path. One may want to use this function
     to search the possible nodes one visits when following a sequence of edges.
 
     Arguments:
     - `start`: start node
     - `goal`: goal node
-    - `edges_path`: a list containing the sequence of edge names you want to consider.
+    - `edges_path` (list or string): a list containing the sequence of edge names you want to consider; it can also be a PRA-style string describing the sequence of edges.
     - `nodes_path` (optional): the current set of nodes the have been visited so far.
+    - `allow_cycles` (bool): allow the search to expand to already visited nodes.
     """
     if nodes_path is None:
         nodes_path = [start]
+    if type(edges_path) == str:
+        edges_path = edges_path.split('-')[1:-1]
     if len(edges_path) == 0:
         if start == goal: yield nodes_path
     else:
@@ -25,8 +35,12 @@ def dfs_node_sequence_from_path(start, goal, edges_path, nodes_path=None):
             edge_type = edge_string
             neighbors = start.out_edge2neighbors.get(edge_type, set())
             inversed = False
-        for next_ in set(neighbors) - set(nodes_path):
-            for p in dfs_node_sequence_from_path(next_, goal, edges_path[1:], nodes_path + [next_]):
+        if allow_cycles:
+            next_nodes = set(neighbors)
+        else:
+            next_nodes = set(neighbors) - set(nodes_path)
+        for next_ in next_nodes:
+            for p in dfs_node_sequence_from_path(next_, goal, edges_path[1:], nodes_path + [next_], allow_cycles=allow_cycles):
                 yield p
 
 
@@ -149,5 +163,39 @@ def compare_feature_matrices(filepath1, filepath2):
     z1_diff_z2.sort()
     z2_diff_z1.sort()
 
-    print "Entity pairs that are different will be returned by this function."
-    return z1_diff_z2, z2_diff_z1
+    print "Differences found.\n{} examples in FM1 diverge from FM2;\n{} examples in FM2 diverge from FM1.\nDifferent entity pairs will be described next. FM1 and FM2 refers to the feature matrices in filepath1 and filepath2, respectively.".format(len(z1_diff_z2), len(z2_diff_z1))
+
+    # unzip elements to separate entity pairs,
+    heads, tails, labels1, feat_dicts1 = zip(*z1_diff_z2)
+    ent_pairs1 = zip(heads, tails)
+    heads, tails, labels2, feat_dicts2 = zip(*z2_diff_z1)
+    ent_pairs2 = zip(heads, tails)
+
+    compare_instances(ent_pairs1, labels1, feat_dicts1, ent_pairs2, labels2, feat_dicts2, order=['FM1', 'FM2'])
+    compare_instances(ent_pairs2, labels2, feat_dicts2, ent_pairs1, labels1, feat_dicts1, order=['FM2', 'FM1'])
+
+def compare_instances(ent_pairs1, labels1, feat_dicts1, ent_pairs2, labels2, feat_dicts2, order=['FM1', 'FM2']):
+    for ent_pair in ent_pairs1:
+        print("\n\n\n-----------------------------------------------------------------------")
+        print("Entity pair:\n\t{}".format(ent_pair))
+        if ent_pair in ent_pairs2:
+            idx1 = ent_pairs1.index(ent_pair)
+            idx2 = ent_pairs2.index(ent_pair)
+            label1 = labels1[idx1]
+            label2 = labels2[idx2]
+            feats1 = feat_dicts1[idx1]
+            feats2 = feat_dicts2[idx2]
+            if label1 != label2: print("\nLabels are different: {} ({}) and {} ({})".format(label1, order[0], label2, order[1]))
+            dict_compare(feats1, feats2, order)
+        else:
+            print('Entity pair in {} not present in {}.'.format(order[0], order[1]))
+
+def dict_compare(d1, d2, order):
+    d1_keys = set(d1.keys())
+    d2_keys = set(d2.keys())
+    intersect_keys = d1_keys.intersection(d2_keys)
+    added = d1_keys - d2_keys
+    removed = d2_keys - d1_keys
+    modified = {o : (d1[o], d2[o]) for o in intersect_keys if d1[o] != d2[o]}
+    same = set(o for o in intersect_keys if d1[o] == d2[o])
+    print("\n{} diff {}:\n{}\n\n{} diff {}:\n{}\n\nModified:\n{}\n\nSame:\n{}".format(order[0], order[1], added, order[1], order[0], removed, modified, same))

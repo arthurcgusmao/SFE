@@ -5,14 +5,6 @@ import numpy as np
 from multiprocessing import Queue, Process
 from multiprocessing import cpu_count
 import threading
-# from helpers import save_features_to_disk
-
-def debug_get_name_of_els_in_list(list_of_els):
-    """Prints a list of elements using their string method."""
-    l = []
-    for n in list_of_els:
-        l.append(n.__str__())
-    return l
 
 
 class Edge(object):
@@ -105,7 +97,7 @@ class Graph(object):
 
 
 class SFE(object):
-    def __init__(self, graph, max_depth=2, max_fan_out=100, bfs_memory_size=50):
+    def __init__(self, graph, max_depth=2, max_fan_out=100, bfs_memory_size=50, allow_cycles=False):
         """Init method.
 
         Arguments:
@@ -122,6 +114,8 @@ class SFE(object):
         self.bfs_memory = {}
         self.bfs_memory_size = bfs_memory_size
         self.bfs_memory_stack = []
+
+        self.allow_cycles = allow_cycles
 
     def add_to_bfs_memory(self, node, bfs_result):
         """Adds the current node's BFS result to memory.
@@ -163,7 +157,11 @@ class SFE(object):
             for edge_type in vertex.edge_fan_out:
                 if vertex.edge_fan_out[edge_type] <= self.max_fan_out: # only expand nodes whose fan_out does not exceed max
                     # loop for outgoing edges
-                    for node in vertex.out_edge2neighbors.get(edge_type, set()) - set(node_seq):
+                    if self.allow_cycles:
+                        remove_set = set()
+                    else:
+                        remove_set = set(node_seq)
+                    for node in vertex.out_edge2neighbors.get(edge_type, set()) - remove_set:
                         new_node_seq = node_seq + (node,)
                         new_edge_seq = edge_seq + (edge_type,) if not is_tail else edge_seq + ('_' + edge_type,) # edges preceded by '_' are incoming edges
                         node_seq2edge_seqs = output.get(node, {})
@@ -172,7 +170,7 @@ class SFE(object):
                         if level+1 < self.max_depth:
                             queue.append((node, new_node_seq, new_edge_seq, level+1))
                     # loop for incoming edges
-                    for node in vertex.in_edge2neighbors.get(edge_type, set()) - set(node_seq):
+                    for node in vertex.in_edge2neighbors.get(edge_type, set()) - remove_set:
                         new_node_seq = node_seq + (node,)
                         new_edge_seq = edge_seq + ('_' + edge_type,) if not is_tail else edge_seq + (edge_type,) # edges preceded by '_' are incoming edges
                         node_seq2edge_seqs = output.get(node, {})
@@ -199,7 +197,7 @@ class SFE(object):
                     for tail_node_seq in tail__node_seq2edge_seqs:
                         # print '`head_node_seq`:', head_node_seq, type(head_node_seq)
                         # print '`tail_node_seq`:', tail_node_seq, type(tail_node_seq)
-                        if len(set(tail_node_seq).intersection(set(head_node_seq))) == 1: # check for acyclicity
+                        if self.allow_cycles or len(set(tail_node_seq).intersection(set(head_node_seq))) == 1: # check for acyclicity
                             # print '`head_node_seq`:', head_node_seq, type(head_node_seq)
                             # print '`tail_node_seq`:', tail_node_seq, type(tail_node_seq)
                             for head_edge_seq in head__node_seq2edge_seqs[head_node_seq]:
