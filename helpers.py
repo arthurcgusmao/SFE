@@ -115,6 +115,11 @@ def parse_feature_matrix(filepath):
 ## PROCESS DATASET TO BUILD GRAPH INPUT
 ##
 def build_graph_input_from_benchmark(benchmark_path):
+    graph_input_path = os.path.join(benchmark_path, 'pra_graph_input')
+    if os.path.exists(graph_input_path):
+        print 'Graph input already exists for current benchmark, not (re)building it.\n'
+        return
+    
     import pandas as pd
     train2id = pd.read_csv(benchmark_path + '/train2id.txt', sep=' ', skiprows=1, names=['head', 'tail', 'relation'])
     valid2id = pd.read_csv(benchmark_path + '/valid2id.txt', sep=' ', skiprows=1, names=['head', 'tail', 'relation'])
@@ -130,7 +135,9 @@ def build_graph_input_from_benchmark(benchmark_path):
 
     valid_pos = valid.loc[valid['label'] == 1]
 
-    # @TODO: the dataframes to save are `valid_pos` and `train`. They must be saved into a folder called `pra_graph_input`, e.g., XKE/benchmarks/NELL186/pra_graph_input/train.tsv and valid.tsv
+    os.mkdir(graph_input_path)
+    train.to_csv(os.path.join(graph_input_path, 'train.tsv'), index=False, header=False, sep='\t', columns=['head', 'relation', 'tail'])
+    valid_pos.to_csv(os.path.join(graph_input_path, 'valid.tsv'), index=False, header=False, sep='\t', columns=['head', 'relation', 'tail'])
 
 
 ##################################################################

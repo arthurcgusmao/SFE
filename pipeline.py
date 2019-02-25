@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import multiprocessing as mp
+import json
 
 from sfe import Graph, SFE
 from helpers import save_features_to_disk
@@ -19,6 +20,13 @@ def pipeline(
     batch_size=10000, # number of features that will be processed in a row before saving them to disk (and freeing up memory space). Notice that this applies to each Process, so in practice this number is multiplied by the number of cores.
     allow_cycles=False,
 ):
+
+    # SAVE HYPERPARAMS TO DISK
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    params_str = json.dumps(locals())
+    with open(os.path.join(output_dir, 'hyperparameters.json'), 'w') as f:
+        f.write(params_str)
 
     # BUILD GRAPH
     g = Graph()
@@ -46,3 +54,4 @@ def pipeline(
             print("{} examples processed...".format(count))
 
     print("\nPipeline finished.")
+    return sfe
